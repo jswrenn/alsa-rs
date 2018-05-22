@@ -7,6 +7,8 @@ use super::{Direction, poll};
 use std::{ptr, fmt, mem, slice, time, cell};
 use std::ffi::{CStr};
 use std::borrow::Cow;
+use futures::{Stream, Async};
+use futures::task::Context;
 
 // Some constants that are not in alsa-sys
 const SND_SEQ_OPEN_OUTPUT: i32 = 1;
@@ -210,6 +212,12 @@ impl<'a> Input<'a> {
         // Therefore we mutably borrow the `Input` structure, preventing any
         // other function call that might change the input buffer while the
         // event is alive.
+        unsafe { self.event_input_unsafe() }
+    }
+
+    unsafe fn event_input_unsafe(&mut self) -> Result<Event<'a>> {
+        // This method is unsafe in the sense that it does not guarantee
+        // that the input buffer is not modified while the event is alive.
         let mut z = ptr::null_mut();
         try!(acheck!(snd_seq_event_input((self.0).0, &mut z)));
         unsafe { Event::extract (&mut *z, "snd_seq_event_input") }
@@ -222,7 +230,33 @@ impl<'a> Input<'a> {
     pub fn set_input_buffer_size(&self, size: u32)  -> Result<()> {
         acheck!(snd_seq_set_input_buffer_size((self.0).0, size as size_t)).map(|_| ())
     }
+
+    pub fn stream<'b>(&'b mut self) -> InputStream<'a, 'b> {
+        InputStream(self)
+    }
 }
+
+
+pub struct InputStream<'a, 'b>(&'b mut Input<'a>) where 'a: 'b;
+
+
+impl<'a, 'b> Stream for InputStream<'a, 'b> where 'a: 'b
+{
+    type Item = Event<'a>;
+    type Error = Error;
+
+    fn poll_next(&mut self, cx: &mut Context)
+        -> Result<Async<Option<Self::Item>>>
+    {
+        if self.0.event_input_pending(true)? == 0 {
+            Ok(Async::Pending)
+        } else {
+            unsafe{self.0.event_input_unsafe()}
+              .map(Some).map(Async::Ready)
+        }
+    }
+}
+
 
 fn polldir(o: Option<Direction>) -> c_short {
     match o {

@@ -19,6 +19,7 @@ extern crate libc;
 extern crate bitflags;
 #[macro_use]
 extern crate nix;
+extern crate futures;
 
 macro_rules! alsa_enum {
  ($(#[$attr:meta])+ $name:ident, $static_name:ident [$count:expr], $( $a:ident = $b:ident),* ,) =>
